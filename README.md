@@ -104,3 +104,24 @@ Example POST body:
 ```
 
 This v0.5 copilot uses transparent deterministic intent routing over the same PCC/counterfactual evidence, so the hackathon demo has no cloud-LLM or GPU dependency. A later optional LLM adapter can improve conversational breadth without becoming part of the control or safety logic.
+
+## v0.6: interactive disturbance injection
+
+v0.6 turns the dashboard into a judge-friendly **Scenario Lab**. A dispatcher can inject one of five synthetic disturbance families and adjust severity from the browser:
+
+- truck breakdown
+- traffic surge
+- hours-of-service shortage
+- depot outage (represented by a regional-capacity proxy in the compact model)
+- compound shock
+
+For each run, Sentinel evolves the disturbance over time, computes PCC/entropy dynamics, detects the first warning, evaluates feasible CPU-only control actions, and plots the counterfactual **no control vs. Sentinel control** instability trajectories. The dashboard reports warning time, hard-failure time when reached, lead time, the selected intervention, and ranked alternatives.
+
+New endpoints:
+
+```text
+GET /incidents
+GET /interactive-scenario?incident=compound_shock&severity=0.8
+```
+
+The scenario lab remains a synthetic demonstration rather than a calibrated trucking simulator. Its purpose is to make the control-system idea tangible: judges can perturb the system themselves and observe how pressure, uncertainty, and control options interact.
