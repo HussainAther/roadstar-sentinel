@@ -299,41 +299,93 @@ def _trajectory_cost(points: list[TrajectoryPoint], control_time: float, action:
     return instability + 0.35 * cascade + 0.25 * failure_fraction + action_penalty
 
 
+def action_ref(action: ControlAction) -> str:
+    """Stable, URL-safe identifier for a candidate control action."""
+    parts = [action.kind, action.load_id or "-", action.target_truck_id or "-", f"{action.delay_hours:.2f}"]
+    return ":".join(parts)
+
+
+def _score_incident_actions(
+    kind: IncidentKind,
+    severity: float,
+    rollouts: int,
+    seed: int,
+) -> tuple[FleetState, list[TrajectoryPoint], TrajectoryPoint | None, TrajectoryPoint | None, float, list[tuple[float, ControlAction, list[TrajectoryPoint]]]]:
+    base = creeping_failure_scenario()
+    no_control = simulate_incident(kind, severity=severity, rollouts=rollouts, seed=seed, base=base)
+    warning = next((p for p in no_control if p.early_warning), None)
+    failure = next((p for p in no_control if p.conventional_failure), None)
+
+    control_time = warning.time_hours if warning is not None else no_control[-1].time_hours
+    warning_state = incident_state(base, kind, control_time, severity)
+    actions = candidate_actions(warning_state, max_candidates=16)
+
+    scored: list[tuple[float, ControlAction, list[TrajectoryPoint]]] = []
+    for action in actions:
+        trajectory = _trajectory_with_action(
+            base, kind, severity, action, control_time, no_control,
+            rollouts=max(35, rollouts // 2), seed=seed + 100,
+        )
+        scored.append((_trajectory_cost(trajectory, control_time, action), action, trajectory))
+    scored.sort(key=lambda x: x[0])
+    return base, no_control, warning, failure, control_time, scored
+
+
+def analyze_selected_action(
+    kind: IncidentKind,
+    action_id: str,
+    severity: float = 0.7,
+    rollouts: int = 90,
+    seed: int = 41,
+) -> dict:
+    """Human-in-the-loop counterfactual: evaluate the dispatcher's chosen action."""
+    _, no_control, warning, failure, control_time, scored = _score_incident_actions(
+        kind, severity, rollouts, seed
+    )
+    chosen = next((item for item in scored if action_ref(item[1]) == action_id), None)
+    if chosen is None:
+        return {
+            "error": "Unknown or infeasible action for this scenario state.",
+            "valid_actions": [action_ref(a) for _, a, _ in scored],
+        }
+
+    chosen_cost, chosen_action, chosen_trajectory = chosen
+    best_cost, best_action, best_trajectory = scored[0]
+    no_action = next((x for x in scored if x[1].kind == "none"), scored[0])
+    chosen_failure = next((p for p in chosen_trajectory if p.conventional_failure), None)
+    best_failure = next((p for p in best_trajectory if p.conventional_failure), None)
+
+    return {
+        "incident": kind,
+        "severity": severity,
+        "control_time_hours": control_time,
+        "warning_time_hours": warning.time_hours if warning else None,
+        "baseline_failure_time_hours": failure.time_hours if failure else None,
+        "chosen_action": {**chosen_action.__dict__, "action_id": action_ref(chosen_action)},
+        "sentinel_action": {**best_action.__dict__, "action_id": action_ref(best_action)},
+        "chosen_objective": chosen_cost,
+        "sentinel_objective": best_cost,
+        "no_action_objective": no_action[0],
+        "chosen_improvement_vs_no_action": no_action[0] - chosen_cost,
+        "sentinel_improvement_vs_no_action": no_action[0] - best_cost,
+        "regret_vs_sentinel": chosen_cost - best_cost,
+        "chosen_failure_time_hours": chosen_failure.time_hours if chosen_failure else None,
+        "sentinel_failure_time_hours": best_failure.time_hours if best_failure else None,
+        "no_control": no_control,
+        "chosen_control": chosen_trajectory,
+        "sentinel_control": best_trajectory,
+    }
+
+
 def analyze_incident(
     kind: IncidentKind,
     severity: float = 0.7,
     rollouts: int = 90,
     seed: int = 41,
 ) -> dict:
-    base = creeping_failure_scenario()
-    no_control = simulate_incident(kind, severity=severity, rollouts=rollouts, seed=seed, base=base)
-    warning = next((p for p in no_control if p.early_warning), None)
-    failure = next((p for p in no_control if p.conventional_failure), None)
-
-    if warning is None:
-        # Low-severity runs can stay stable. Evaluate the final state so the UI still
-        # offers useful contingency actions instead of throwing an error.
-        control_time = no_control[-1].time_hours
-        warning_state = incident_state(base, kind, control_time, severity)
-    else:
-        control_time = warning.time_hours
-        warning_state = incident_state(base, kind, control_time, severity)
-
-    actions = candidate_actions(warning_state, max_candidates=16)
-    scored: list[tuple[float, ControlAction, list[TrajectoryPoint]]] = []
-    for action in actions:
-        trajectory = _trajectory_with_action(
-            base,
-            kind,
-            severity,
-            action,
-            control_time,
-            no_control,
-            rollouts=max(35, rollouts // 2),
-            seed=seed + 100,
-        )
-        scored.append((_trajectory_cost(trajectory, control_time, action), action, trajectory))
-    scored.sort(key=lambda x: x[0])
+    _, no_control, warning, failure, control_time, scored = _score_incident_actions(
+        kind, severity, rollouts, seed
+    )
     best_cost, best_action, controlled = scored[0]
     no_action = next((x for x in scored if x[1].kind == "none"), scored[0])
 
@@ -353,11 +405,12 @@ def analyze_incident(
         ),
         "selected_action": {
             **best_action.__dict__,
+            "action_id": action_ref(best_action),
             "objective": best_cost,
             "improvement_vs_no_action": max(0.0, no_action[0] - best_cost),
         },
         "recommendations": [
-            {**action.__dict__, "objective": cost}
+            {**action.__dict__, "action_id": action_ref(action), "objective": cost}
             for cost, action, _ in scored[:5]
         ],
         "current_metrics": selected_point.metrics.__dict__,

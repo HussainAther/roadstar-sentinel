@@ -125,3 +125,17 @@ GET /interactive-scenario?incident=compound_shock&severity=0.8
 ```
 
 The scenario lab remains a synthetic demonstration rather than a calibrated trucking simulator. Its purpose is to make the control-system idea tangible: judges can perturb the system themselves and observe how pressure, uncertainty, and control options interact.
+
+## v0.7: human-in-the-loop dispatcher cockpit
+
+v0.7 makes the control recommendation explicitly **advisory rather than autonomous**. In the Scenario Lab, Sentinel still ranks counterfactual interventions, but the dispatcher can click any feasible alternative and simulate that override before acting. The dashboard then redraws the no-control versus chosen-control trajectory and reports the chosen action's objective improvement, failure timing, and **regret versus Sentinel's best-ranked action**.
+
+This gives the hackathon demo a concrete human-AI workflow: **detect -> recommend -> inspect alternatives -> operator chooses -> counterfactual replay -> compare**. The underlying scoring and simulation remain CPU-only and deterministic under fixed seeds; no GPU or cloud LLM is required.
+
+New endpoint:
+
+```text
+GET /operator-counterfactual?incident=compound_shock&severity=0.8&action_id=...
+```
+
+As in prior versions, all outcomes are synthetic prototype results rather than validated trucking dispatch recommendations.

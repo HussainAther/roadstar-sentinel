@@ -20,3 +20,22 @@ def test_compound_shock_returns_ranked_control_and_counterfactual():
     assert result["recommendations"]
     assert len(result["no_control"]) == len(result["sentinel_control"])
     assert result["selected_action"]["improvement_vs_no_action"] >= 0.0
+
+
+def test_operator_can_simulate_non_default_action():
+    base = analyze_incident("compound_shock", severity=0.8, rollouts=30, seed=11)
+    options = [x for x in base["recommendations"] if x["kind"] != "none"]
+    assert options
+    from roadstar_sentinel.interactive import analyze_selected_action
+    result = analyze_selected_action("compound_shock", options[-1]["action_id"], severity=0.8, rollouts=30, seed=11)
+    assert "error" not in result
+    assert result["chosen_action"]["action_id"] == options[-1]["action_id"]
+    assert len(result["chosen_control"]) == len(result["no_control"])
+    assert result["regret_vs_sentinel"] >= -1e-9
+
+
+def test_invalid_operator_action_is_rejected_cleanly():
+    from roadstar_sentinel.interactive import analyze_selected_action
+    result = analyze_selected_action("traffic_surge", "not:a:real:action", severity=0.7, rollouts=20, seed=5)
+    assert "error" in result
+    assert result["valid_actions"]
