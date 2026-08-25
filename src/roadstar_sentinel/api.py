@@ -14,8 +14,9 @@ from .dispatcher import answer_dispatcher_question, build_dispatcher_brief, comp
 from .pcc import evaluate_pcc
 from .scenarios import baseline_scenario, creeping_failure_scenario, disrupted_scenario
 from .interactive import analyze_incident, analyze_selected_action, incident_catalog
+from .operations import operations_view
 
-app = FastAPI(title="RoadStar Sentinel", version="0.7.0")
+app = FastAPI(title="RoadStar Sentinel", version="0.8.0")
 
 
 def serialize_scenario(name: str) -> dict:
@@ -78,7 +79,7 @@ def root() -> dict:
         "name": "RoadStar Sentinel",
         "tagline": "Detect instability before logistics systems fail.",
         "framework": "Pressure -> Chaos -> Control",
-        "version": "0.7.0",
+        "version": "0.8.0",
         "dashboard": "/dashboard",
     }
 
@@ -223,6 +224,14 @@ def interactive_scenario(incident: str = "truck_breakdown", severity: float = 0.
     }
 
 
+@app.get("/operations-view")
+def operations_center(incident: str = "truck_breakdown", severity: float = 0.7, time_hours: float | None = None) -> dict:
+    valid = {item["kind"] for item in incident_catalog()}
+    if incident not in valid:
+        return {"error": f"Unknown incident '{incident}'.", "valid_incidents": sorted(valid)}
+    return operations_view(incident, severity=max(0.0, min(1.0, severity)), time_hours=time_hours)
+
+
 @app.get("/operator-counterfactual")
 def operator_counterfactual(incident: str, action_id: str, severity: float = 0.7) -> dict:
     valid = {item["kind"] for item in incident_catalog()}
@@ -256,7 +265,7 @@ def dashboard() -> str:
 </head>
 <body>
 <div class="wrap">
- <div class="header"><div><div class="kicker">Pressure -> Chaos -> Control</div><h1>RoadStar Sentinel</h1><div class="sub">Dynamic entropy early warning for resilient freight networks.</div></div><div class="badge">v0.7 · CPU-only human-in-the-loop cockpit</div></div>
+ <div class="header"><div><div class="kicker">Pressure -> Chaos -> Control</div><h1>RoadStar Sentinel</h1><div class="sub">Dynamic entropy early warning for resilient freight networks.</div></div><div class="badge">v0.8 · CPU-only operations center</div></div>
  <div class="panel scenario-lab">
   <div class="kicker">Interactive Scenario Lab</div>
   <div class="statusline"><h2 style="margin:7px 0 4px">Break the fleet. Watch Sentinel respond.</h2><span id="scenarioStatus" class="status-chip">READY</span></div>
@@ -266,6 +275,16 @@ def dashboard() -> str:
   <div class="scenario-result">
    <div><div class="canvas-wrap"><canvas id="scenarioChart" width="760" height="300" style="width:100%;height:auto"></canvas></div><div class="legend"><span><i class="sw" style="background:#ef7c7c"></i>No control</span><span><i class="sw" style="background:#93e7b9"></i>Sentinel control</span></div></div>
    <div><div id="scenarioSummary" class="alert">Choose a disturbance and run it.</div><div class="kicker">Human-in-the-loop decision</div><div class="small">Sentinel recommends an action, but the dispatcher can override it and simulate that choice before committing.</div><div id="scenarioRecs"></div><div id="operatorOutcome"></div></div>
+  </div>
+ </div>
+ <div class="panel scenario-lab">
+  <div class="kicker">Operations Center</div>
+  <div class="statusline"><h2 style="margin:7px 0 4px">Fleet network + disturbance propagation</h2><span class="status-chip" id="opsClock">t = 0.00 h</span></div>
+  <div class="sub">Schematic synthetic network view. Slide through time to see affected loads, truck state, warning onset, and the intervention window.</div>
+  <div class="slider" style="margin:12px 0"><span class="small">Replay time</span><input id="opsTime" type="range" min="0" max="3" step="0.25" value="1" oninput="loadOperations()"/><b id="opsTimeValue">1.00 h</b></div>
+  <div class="scenario-result">
+   <div><div class="canvas-wrap"><canvas id="fleetMap" width="760" height="390" style="width:100%;height:auto"></canvas></div><div class="legend"><span><i class="sw" style="background:#93e7b9"></i>OK</span><span><i class="sw" style="background:#f5b95f"></i>Watch</span><span><i class="sw" style="background:#ef7c7c"></i>At risk / out</span><span><i class="sw" style="background:#69d7ff"></i>Load lane</span></div></div>
+   <div><div id="opsSummary" class="alert">Loading fleet operations view…</div><div class="kicker">Incident timeline</div><div id="opsTimeline"></div></div>
   </div>
  </div>
  <div class="metric-grid" id="metrics"></div>
@@ -295,6 +314,11 @@ async function runScenario(){const sev=parseFloat(document.getElementById('sever
 async function simulateOperatorChoice(actionId){const sev=parseFloat(document.getElementById('severity').value);document.getElementById('operatorOutcome').innerHTML='<div class="rec">Simulating dispatcher choice...</div>';const d=await fetch(`/operator-counterfactual?incident=${activeIncident}&severity=${sev}&action_id=${encodeURIComponent(actionId)}`).then(r=>r.json());if(d.error){document.getElementById('operatorOutcome').innerHTML=`<div class="rec">${d.error}</div>`;return}drawScenario(d.no_control,d.chosen_control,d.control_time_hours);const regret=d.regret_vs_sentinel;const verdict=regret<=0.000001?'Matches Sentinel optimum':regret<0.03?'Near-optimal override':'Higher-risk override';document.getElementById('operatorOutcome').innerHTML=`<div class="alert" style="margin-top:10px"><strong>${verdict}</strong><div class="small">Chosen: ${d.chosen_action.label}</div><div class="decision-grid"><div class="small">vs no action<b>${d.chosen_improvement_vs_no_action>=0?'+':''}${d.chosen_improvement_vs_no_action.toFixed(3)}</b></div><div class="small">regret vs Sentinel<b>${d.regret_vs_sentinel.toFixed(3)}</b></div><div class="small">failure time<b>${d.chosen_failure_time_hours==null?'avoided / not reached':d.chosen_failure_time_hours.toFixed(2)+' h'}</b></div></div><div class="small" style="margin-top:8px">Sentinel pick: ${d.sentinel_action.label}. The chart now shows <b>your chosen control</b> in green against no control in red.</div></div>`} 
 async function askSentinel(){const q=document.getElementById('question').value;document.getElementById('answer').textContent='Thinking over the simulated fleet state...';const r=await fetch('/dispatcher-query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})}).then(r=>r.json());document.getElementById('answer').innerHTML=`<strong>${r.intent.replaceAll('_',' ')}</strong><div class="small">${r.answer}</div>`}
 async function load(){const d=await fetch('/trajectory').then(r=>r.json()),pts=d.points,last=pts[pts.length-1],warn=pts.find(x=>x.early_warning)||pts[0];document.getElementById('metrics').innerHTML=[metricCard('Pressure',pct(warn.pressure)),metricCard('Entropy',pct(warn.entropy)),metricCard('dH/dt',warn.entropy_rate.toFixed(2),'/h'),metricCard('Control',pct(warn.control)),metricCard('Instability',pct(warn.instability)),metricCard('Cascade risk',pct(warn.cascade_risk))].join('');document.getElementById('warningTime').textContent=d.warning_time_hours==null?'—':d.warning_time_hours.toFixed(2)+' h';document.getElementById('failureTime').textContent=d.failure_time_hours==null?'—':d.failure_time_hours.toFixed(2)+' h';document.getElementById('leadTime').textContent=d.lead_time_hours==null?'—':d.lead_time_hours.toFixed(2)+' h';document.getElementById('alert').innerHTML=d.lead_time_hours!=null?`<strong>Early warning demonstrated:</strong> predictive entropy accelerates and Sentinel flags instability <strong>${d.lead_time_hours.toFixed(2)} hours</strong> before the synthetic conventional-failure threshold.`:`<strong>No pre-failure lead time</strong> in this seeded run.`;drawChart(pts,d.warning_time_hours,d.failure_time_hours);const recs=d.warning_recommendations.filter(x=>x.action.kind!=='none').slice(0,5);const cl=await fetch('/closed-loop').then(r=>r.json());const db=await fetch('/dispatcher-brief').then(r=>r.json());document.getElementById('selectedControl').innerHTML=`<strong>${db.headline}</strong><div class="small">${db.summary}</div><div class="small">Confidence: <b>${db.confidence}</b> · ${db.confidence_reason}</div>`;document.getElementById('dispatcherBrief').innerHTML=`<div class="rec"><strong>Why now?</strong><div class="small">${db.why_now}</div></div><div class="rec"><strong>No-action counterfactual</strong><div class="small">${db.no_action_consequence}</div></div><div class="rec"><strong>Expected effect</strong><div class="small">${db.expected_effect.join('<br>')}</div></div>`;document.getElementById('causalChain').innerHTML=db.causal_chain.map(x=>`<div class="factor"><strong>${x.name}</strong><span class="pill">${x.severity}</span><div class="small">${x.evidence}</div><div class="small">${x.implication}</div></div>`).join('');const alts=cl.alternatives.filter(x=>x.action.kind!=='none').slice(0,5);document.getElementById('recommendations').innerHTML=alts.map((r,i)=>`<div class="rec"><span class="rank">${i+1}.</span>${r.action.label}<div class="small">objective ${r.objective.toFixed(3)} · mean instability ${pct(r.mean_instability)}% · mean cascade ${pct(r.mean_cascade_risk)}%</div></div>`).join('')||'<div class="rec">No intervention generated.</div>';drawControl(cl.no_control,cl.sentinel_control,cl.control_time_hours);document.getElementById('controlStory').innerHTML=`<div class="small">Instability burden reduction<b>${pct(cl.instability_auc.reduction)}%</b></div><div class="small">Cascade burden reduction<b>${pct(cl.cascade_auc.reduction)}%</b></div><div class="small">Failure outcome<b>${cl.selected_outcome.failure_avoided?'Avoided':(cl.selected_outcome.failure_delay_hours!=null?'Delayed '+cl.selected_outcome.failure_delay_hours.toFixed(2)+' h':'Not avoided')}</b></div>`;const e=await fetch('/experiment').then(r=>r.json());document.getElementById('experiment').innerHTML=`<div class="small">Scenarios<b>${e.scenarios}</b></div><div class="small">Failures<b>${e.failures}</b></div><div class="small">Non-failures<b>${e.non_failures}</b></div>`;document.getElementById('detectors').innerHTML=e.detectors.map(x=>`<div class="rec"><strong>${x.name}</strong><div class="small">precision ${pct(x.precision)}% · recall ${pct(x.recall)}% · false-positive rate ${pct(x.false_positive_rate)}% · median lead ${x.median_lead_time_hours==null?'—':x.median_lead_time_hours.toFixed(2)+' h'}</div></div>`).join('')}
-setupScenarioLab();load();askSentinel();
+
+function riskColor(t){if(!t.active||t.risk>=.65)return '#ef7c7c';if(t.risk>=.38)return '#f5b95f';return '#93e7b9'}
+function drawFleetMap(d){const c=document.getElementById('fleetMap'),ctx=c.getContext('2d'),W=c.width,H=c.height,p={l:36,r:30,t:28,b:34};ctx.clearRect(0,0,W,H);ctx.fillStyle='#07121c';ctx.fillRect(0,0,W,H);function x(v){return p.l+(W-p.l-p.r)*(v/200)}function y(v){return H-p.b-(H-p.t-p.b)*((v+20)/120)}ctx.strokeStyle='#183047';ctx.lineWidth=1;for(let i=0;i<6;i++){let xx=p.l+(W-p.l-p.r)*i/5;ctx.beginPath();ctx.moveTo(xx,p.t);ctx.lineTo(xx,H-p.b);ctx.stroke()}for(let i=0;i<5;i++){let yy=p.t+(H-p.t-p.b)*i/4;ctx.beginPath();ctx.moveTo(p.l,yy);ctx.lineTo(W-p.r,yy);ctx.stroke()}for(const load of d.loads){ctx.strokeStyle='#244e68';ctx.lineWidth=1.5;ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(x(load.pickup[0]),y(load.pickup[1]));ctx.lineTo(x(load.dropoff[0]),y(load.dropoff[1]));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#69d7ff';ctx.font='10px system-ui';ctx.fillText(load.id,x(load.dropoff[0])+4,y(load.dropoff[1])-4)}for(const h of d.hubs){ctx.fillStyle='#b7c8d6';ctx.beginPath();ctx.arc(x(h.x),y(h.y),4,0,Math.PI*2);ctx.fill();ctx.font='11px system-ui';ctx.fillText(h.label,x(h.x)+7,y(h.y)+4)}for(const t of d.trucks){ctx.shadowBlur=t.risk>=.65?12:0;ctx.shadowColor=riskColor(t);ctx.fillStyle=riskColor(t);ctx.beginPath();ctx.arc(x(t.x),y(t.y),7,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#e9eef5';ctx.font='bold 11px system-ui';ctx.fillText(t.id,x(t.x)+10,y(t.y)+4);ctx.fillStyle='#8fa7bc';ctx.font='10px system-ui';ctx.fillText(t.load_id||'unassigned',x(t.x)+10,y(t.y)+16)}const affected=new Set(d.propagation.map(e=>e.to));for(const load of d.loads.filter(l=>affected.has(l.id))){ctx.strokeStyle='#ef7c7c';ctx.globalAlpha=.45;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(x(load.pickup[0]),y(load.pickup[1]));ctx.lineTo(x(load.dropoff[0]),y(load.dropoff[1]));ctx.stroke();ctx.globalAlpha=1}ctx.fillStyle='#8fa7bc';ctx.font='11px system-ui';ctx.fillText('Synthetic schematic — not GPS/road geometry',p.l,H-10)}
+async function loadOperations(){const el=document.getElementById('opsTime');if(!el)return;const t=parseFloat(el.value),sev=parseFloat(document.getElementById('severity').value);document.getElementById('opsTimeValue').textContent=t.toFixed(2)+' h';document.getElementById('opsClock').textContent='t = '+t.toFixed(2)+' h';const d=await fetch(`/operations-view?incident=${activeIncident}&severity=${sev}&time_hours=${t}`).then(r=>r.json());if(d.error)return;drawFleetMap(d);const risky=d.trucks.filter(x=>x.status==='AT RISK'||x.status==='OUT');document.getElementById('opsSummary').innerHTML=`<strong>${risky.length?risky.length+' truck(s) exposed':'Fleet currently contained'}</strong><div class="small">${risky.map(x=>`${x.id} ${x.status} · ${x.load_id||'no load'} · HOS ${x.available_hours.toFixed(1)} h`).join('<br>')||'No truck is in the high-risk band at this replay time.'}</div><div class="small" style="margin-top:7px"><b>Sentinel control:</b> ${d.selected_action?.label||'No action'}</div>`;document.getElementById('opsTimeline').innerHTML=d.timeline.map(e=>{const past=e.time_hours<=t;return `<div class="factor" style="opacity:${past?1:.45}"><strong>${e.time_hours.toFixed(2)} h · ${e.title}</strong><span class="pill">${e.type}</span><div class="small">${e.detail}</div></div>`}).join('')}
+const originalRunScenario=runScenario;runScenario=async function(){await originalRunScenario();await loadOperations()};
+setupScenarioLab();load();askSentinel();setTimeout(loadOperations,250);
 </script>
 </body></html>'''

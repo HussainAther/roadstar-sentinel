@@ -139,3 +139,17 @@ GET /operator-counterfactual?incident=compound_shock&severity=0.8&action_id=...
 ```
 
 As in prior versions, all outcomes are synthetic prototype results rather than validated trucking dispatch recommendations.
+
+## v0.8: trucking operations-center visualization
+
+v0.8 adds a judge-facing operations-center surface without changing the CPU-only architecture. The dashboard now includes a synthetic fleet network map, truck/load status, affected freight lanes, a replay-time slider, and an incident timeline that places the PCC early warning and recommended intervention relative to the later conventional failure.
+
+The map is intentionally schematic: its coordinates are generated from the compact synthetic fleet and are **not** GPS positions or road-network claims. It exists to make disturbance propagation and control timing visually legible during a short demo.
+
+New endpoint:
+
+```text
+GET /operations-view?incident=compound_shock&severity=0.8&time_hours=1.0
+```
+
+This endpoint returns hubs, truck states, load lanes, incident propagation edges, the event timeline, warning/failure timing, and Sentinel's selected control action.
